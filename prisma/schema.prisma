@@ -14,7 +14,12 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
+  
+  // Wallet info
   walletAddress String? @unique
+  nonce         String?
+  isWalletVerified Boolean @default(false)
+  
   firstName String?
   lastName  String?
   phoneNumber String?
