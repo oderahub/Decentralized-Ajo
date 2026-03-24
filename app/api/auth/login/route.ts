@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyPassword, generateToken } from '@/lib/auth';
+import {
+  verifyPassword,
+  generateToken,
+  generateRefreshToken,
+  REFRESH_TOKEN_COOKIE_NAME,
+  getRefreshTokenExpiryDate,
+  isSecureCookieEnvironment,
+} from '@/lib/auth';
 import { validateBody, applyRateLimit } from '@/lib/api-helpers';
 import { LoginSchema } from '@/lib/validations/auth';
 import { RATE_LIMITS } from '@/lib/rate-limit';
@@ -33,8 +40,9 @@ export async function POST(request: NextRequest) {
       email: user.email,
       walletAddress: user.walletAddress || undefined,
     });
+    const refreshToken = await generateRefreshToken(user.id);
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         success: true,
         user: {
@@ -48,6 +56,18 @@ export async function POST(request: NextRequest) {
       },
       { status: 200 },
     );
+
+    response.cookies.set({
+      name: REFRESH_TOKEN_COOKIE_NAME,
+      value: refreshToken,
+      httpOnly: true,
+      secure: isSecureCookieEnvironment(),
+      sameSite: 'lax',
+      path: '/',
+      expires: getRefreshTokenExpiryDate(),
+    });
+
+    return response;
   } catch (err) {
     console.error('Login error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
