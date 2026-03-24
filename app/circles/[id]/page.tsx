@@ -426,16 +426,22 @@ export default function CircleDetailPage() {
                   Vote on circle proposals and rule changes
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <p className="text-muted-foreground">
-                  Governance features coming soon. Members will be able to vote on:
+                  Participate in governance by creating proposals and voting on circle decisions:
                 </p>
-                <ul className="list-disc list-inside text-muted-foreground mt-4 space-y-2">
+                <ul className="list-disc list-inside text-muted-foreground space-y-2">
                   <li>Circle rule changes</li>
                   <li>Member removal</li>
                   <li>Emergency payouts</li>
                   <li>Circle dissolution</li>
+                  <li>Contribution adjustments</li>
                 </ul>
+                <Button asChild className="w-full mt-4">
+                  <Link href={`/circles/${circle.id}/governance`}>
+                    View Governance & Proposals
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
