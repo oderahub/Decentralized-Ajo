@@ -10,11 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Users, TrendingUp, Calendar, Coins } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/auth-client';
-import { formatXLM } from '@/lib/utils';
-import { CircleOverview } from './components/CircleOverview';
-import { MemberTable } from './components/MemberTable';
-import { ContributionHistory } from './components/ContributionHistory';
-import { OrganizerActions } from './components/OrganizerActions';
+import { AdminPanel } from './components/admin-panel';
 
 interface Member {
   id: string;
@@ -247,54 +243,206 @@ export default function CircleDetailPage() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        {!isMember && !isOrganizer ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground mb-4">
-              You are not a member of this circle yet.
-            </p>
-            <Button asChild size="lg">
-              <Link href={`/circles/${circle.id}/join`}>Join This Circle</Link>
-            </Button>
-          </div>
-        ) : (
-          <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="members">Members</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-              {isOrganizer && <TabsTrigger value="admin">Admin</TabsTrigger>}
-            </TabsList>
+        {/* Tabs */}
+        <Tabs defaultValue="overview" className="w-full">
+          <TabsList className={`grid w-full ${isOrganizer ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="members">Members</TabsTrigger>
+            <TabsTrigger value="contributions">Contributions</TabsTrigger>
+            <TabsTrigger value="governance">Governance</TabsTrigger>
+            {isOrganizer && <TabsTrigger value="admin">Admin</TabsTrigger>}
+          </TabsList>
 
-            <TabsContent value="overview" className="mt-6">
-              <CircleOverview
-                circle={circle}
-                isOrganizer={isOrganizer}
-                isMember={isMember}
-                onRefresh={fetchCircle}
-              />
-            </TabsContent>
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6">
+            {!isMember && !isOrganizer ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-muted-foreground mb-4">
+                    You are not a member of this circle yet.
+                  </p>
+                  <Button asChild>
+                    <Link href={`/circles/${circle.id}/join`}>Join This Circle</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Circle Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Organizer</p>
+                      <p className="font-semibold">
+                        {circle.organizer.firstName} {circle.organizer.lastName || circle.organizer.email}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Contribution Frequency</p>
+                      <p className="font-semibold">Every {circle.contributionFrequencyDays} days</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Rounds</p>
+                      <p className="font-semibold">{circle.maxRounds} rounds</p>
+                    </div>
+                  </CardContent>
+                </Card>
 
-            <TabsContent value="members" className="mt-6">
-              <MemberTable
-                members={circle.members}
-                organizerId={circle.organizerId}
-                currentRound={circle.currentRound}
-              />
-            </TabsContent>
-
-            <TabsContent value="history" className="mt-6">
-              <ContributionHistory contributions={circle.contributions} />
-            </TabsContent>
-
-            {isOrganizer && (
-              <TabsContent value="admin" className="mt-6">
-                <OrganizerActions circle={circle} onRefresh={fetchCircle} />
-              </TabsContent>
+                {/* Make Contribution */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Make a Contribution</CardTitle>
+                    <CardDescription>
+                      Contribute {circle.contributionAmount} XLM to the circle fund
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleContribute} className="space-y-4">
+                      <div>
+                        <label className="text-sm font-semibold">Amount (XLM)</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={contributionAmount}
+                            onChange={(e) => setContributionAmount(e.target.value)}
+                            placeholder={circle.contributionAmount.toString()}
+                            className="flex-1 px-3 py-2 border border-border rounded-md bg-background"
+                          />
+                          <Button type="submit" disabled={submittingContribution}>
+                            {submittingContribution ? 'Processing...' : 'Contribute'}
+                          </Button>
+                        </div>
+                      </div>
+                    </form>
+                  </CardContent>
+                </Card>
+              </>
             )}
-          </Tabs>
-        )}
+          </TabsContent>
+
+          {/* Members Tab */}
+          <TabsContent value="members">
+            <Card>
+              <CardHeader>
+                <CardTitle>Circle Members</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {circle.members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 border border-border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-semibold">
+                          {member.user.firstName} {member.user.lastName || member.user.email}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Rotation #{member.rotationOrder}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Contributed: </span>
+                          <span className="font-semibold">{member.totalContributed} XLM</span>
+                        </p>
+                        {member.hasReceivedPayout && (
+                          <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                            Paid Out
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {isOrganizer && (
+                  <Button asChild className="mt-6 w-full">
+                    <Link href={`/circles/${circle.id}/invite`}>Invite Members</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Contributions Tab */}
+          <TabsContent value="contributions">
+            <Card>
+              <CardHeader>
+                <CardTitle>Contribution History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {circle.contributions.length === 0 ? (
+                  <p className="text-muted-foreground">No contributions yet.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {circle.contributions.map((contribution) => (
+                      <div
+                        key={contribution.id}
+                        className="flex items-center justify-between p-4 border border-border rounded-lg"
+                      >
+                        <div>
+                          <p className="font-semibold">
+                            {contribution.user.firstName} {contribution.user.lastName}
+                          </p>
+                          <p className="text-sm text-muted-foreground">Round {contribution.round}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">{contribution.amount} XLM</p>
+                          <p className="text-sm text-muted-foreground">{contribution.status}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Governance Tab */}
+          <TabsContent value="governance">
+            <Card>
+              <CardHeader>
+                <CardTitle>Circle Governance</CardTitle>
+                <CardDescription>
+                  Vote on circle proposals and rule changes
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-muted-foreground">
+                  Participate in governance by creating proposals and voting on circle decisions:
+                </p>
+                <ul className="list-disc list-inside text-muted-foreground space-y-2">
+                  <li>Circle rule changes</li>
+                  <li>Member removal</li>
+                  <li>Emergency payouts</li>
+                  <li>Circle dissolution</li>
+                  <li>Contribution adjustments</li>
+                </ul>
+                <Button asChild className="w-full mt-4">
+                  <Link href={`/circles/${circle.id}/governance`}>
+                    View Governance & Proposals
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Admin Tab - Only visible to organizer */}
+          {isOrganizer && (
+            <TabsContent value="admin">
+              <AdminPanel
+                circleId={circle.id}
+                circle={circle}
+                currentUserId={currentUser?.id}
+                onUpdate={fetchCircle}
+              />
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     </main>
   );
