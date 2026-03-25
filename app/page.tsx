@@ -5,8 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, PlusCircle, Wallet, TrendingUp, CircleDot, ArrowRight } from 'lucide-react';
+import { Users, PlusCircle, Wallet, TrendingUp, CircleDot, ArrowRight, Search } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CircleList } from '@/components/dashboard/circle-list';
 import { authenticatedFetch } from '@/lib/auth-client';
 
 interface Circle {
