@@ -180,6 +180,8 @@ pub enum DataKey {
     LastDepositAt,
     /// Running total of tokens received via deposit (on-chain accounting)
     TotalPool,
+    /// Tracks withdrawals per cycle: Map<cycle_number, Map<member_address, withdrawn>>
+    CycleWithdrawals,
 }
 
 /// Main Ajo Circle contract
@@ -844,6 +846,12 @@ impl AjoCircle {
             .get(&DataKey::Circle)
             .ok_or(AjoError::NotFound)?;
 
+        // Validate cycle is within valid range
+        if cycle == 0 || cycle > circle.max_rounds {
+            return Err(AjoError::InvalidInput);
+        }
+
+        // Check member standing
         let standings: Map<Address, MemberStanding> = env.storage()
             .instance()
             .get(&DataKey::Standings)
@@ -855,31 +863,48 @@ impl AjoCircle {
             }
         }
 
-        let mut members: Map<Address, MemberData> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Members)
-            .ok_or(AjoError::NotFound)?;
+        // Verify cycle has matured (time check)
+        let current_time = env.ledger().timestamp();
+        let cycle_deadline = Self::get_cycle_deadline(&env, cycle)?;
+        
+        if current_time < cycle_deadline {
+            return Err(AjoError::InvalidInput); // Cycle not yet mature
+        }
 
-        // Enforce rotation order if a shuffle has been committed
+        // Verify pool is fully funded for this cycle
+        let required_pool = (circle.member_count as i128) * circle.contribution_amount;
+        if !Self::is_cycle_fully_funded(&env, cycle, required_pool)? {
+            return Err(AjoError::InsufficientFunds);
+        }
+
+        // Enforce rotation order - verify member is designated recipient for this cycle
         if let Some(rotation) = env.storage()
             .instance()
             .get::<DataKey, Vec<Address>>(&DataKey::RotationOrder)
         {
-            // Current round is 1-based; index into rotation is (current_round - 1)
-            let idx = (circle.current_round - 1) as u32;
+            let idx = (cycle - 1) as u32;
             let expected = rotation.get(idx).ok_or(AjoError::InvalidInput)?;
             if expected != member {
                 return Err(AjoError::Unauthorized);
             }
+        } else {
+            return Err(AjoError::InvalidInput); // Rotation not set
         }
 
-        if let Some(mut member_data) = members.get(member.clone()) {
-            if member_data.has_received_payout {
-                return Err(AjoError::AlreadyPaid);
-            }
+        // Check if already withdrawn for this cycle
+        let mut cycle_withdrawals: Map<u32, Map<Address, bool>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::CycleWithdrawals)
+            .unwrap_or(Map::new(&env));
 
-            let payout = (circle.member_count as i128) * circle.contribution_amount;
+        let mut cycle_map = cycle_withdrawals
+            .get(cycle)
+            .unwrap_or(Map::new(&env));
+
+        if cycle_map.get(member.clone()).unwrap_or(false) {
+            return Err(AjoError::AlreadyPaid);
+        }
 
             // EFFECTS: Update state BEFORE external call
             member_data.has_received_payout = true;
@@ -887,6 +912,30 @@ impl AjoCircle {
 
             members.set(member.clone(), member_data);
             env.storage().instance().set(&DataKey::Members, &members);
+        } else {
+            return Err(AjoError::NotFound);
+        }
+
+        // Safe transfer: Execute AFTER state updates (reentrancy protection)
+        let token_client = token::Client::new(&env, &circle.token_address);
+        token_client.transfer(&env.current_contract_address(), &member, &payout);
+
+        Ok(payout)
+    }
+
+    /// Helper: Calculate deadline for a specific cycle
+    fn get_cycle_deadline(env: &Env, cycle: u32) -> Result<u64, AjoError> {
+        let circle: CircleData = env
+            .storage()
+            .instance()
+            .get(&DataKey::Circle)
+            .ok_or(AjoError::NotFound)?;
+
+        let initial_deadline: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoundDeadline)
+            .unwrap_or(0);
 
             // INTERACTIONS: External call happens LAST
             let token_client = token::Client::new(&env, &circle.token_address);
@@ -894,8 +943,49 @@ impl AjoCircle {
 
             Ok(payout)
         } else {
-            Err(AjoError::NotFound)
+            0
+        };
+
+        let deadline = initial_deadline + (cycles_elapsed as u64) * (circle.frequency_days as u64) * 86_400;
+        Ok(deadline)
+    }
+
+    /// Helper: Check if cycle is fully funded
+    fn is_cycle_fully_funded(env: &Env, cycle: u32, required_amount: i128) -> Result<bool, AjoError> {
+        let members: Map<Address, MemberData> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Members)
+            .ok_or(AjoError::NotFound)?;
+
+        let circle: CircleData = env
+            .storage()
+            .instance()
+            .get(&DataKey::Circle)
+            .ok_or(AjoError::NotFound)?;
+
+        let target_per_member = (cycle as i128) * circle.contribution_amount;
+        
+        let mut funded_count = 0_u32;
+        for (_, member_data) in members.iter() {
+            if member_data.total_contributed >= target_per_member {
+                funded_count += 1;
+            }
         }
+
+        Ok(funded_count >= circle.member_count)
+    }
+
+    /// Legacy claim_payout function - now wraps withdraw() for backward compatibility
+    pub fn claim_payout(env: Env, member: Address) -> Result<i128, AjoError> {
+        let circle: CircleData = env
+            .storage()
+            .instance()
+            .get(&DataKey::Circle)
+            .ok_or(AjoError::NotFound)?;
+
+        // Use current round as the cycle
+        Self::withdraw(env, member, circle.current_round)
     }
 
     /// Perform a partial withdrawal with penalty
@@ -1525,3 +1615,4 @@ mod tests {
         assert_eq!(result, Ok(()));
     }
 }
+
