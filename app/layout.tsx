@@ -1,6 +1,44 @@
-import { WalletProvider } from '@/components/wallet/wallet-provider';
-import { Navbar } from '@/components/layout/navbar';
-import './globals.css';
+import type { Metadata, Viewport } from 'next'
+import { Geist, Geist_Mono } from 'next/font/google'
+import { Analytics } from '@vercel/analytics/next'
+import { Toaster } from 'sonner'
+import { WalletProvider } from '@/lib/wallet-context'
+import { ThemeProvider } from '@/components/theme-provider'
+import { Navbar } from '@/components/layout/navbar'
+import './globals.css'
+
+const _geist = Geist({ subsets: ["latin"] });
+const _geistMono = Geist_Mono({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: 'Stellar Ajo - Decentralized Savings Circle',
+  description: 'A decentralized savings circle application on the Stellar Network. Pool money, vote on governance, and manage contributions with full transparency.',
+  generator: 'v0.app',
+  keywords: ['Ajo', 'Esusu', 'Savings Circle', 'Stellar', 'Blockchain', 'Decentralized Finance'],
+  icons: {
+    icon: [
+      {
+        url: '/icon-light-32x32.png',
+        media: '(prefers-color-scheme: light)',
+      },
+      {
+        url: '/icon-dark-32x32.png',
+        media: '(prefers-color-scheme: dark)',
+      },
+      {
+        url: '/icon.svg',
+        type: 'image/svg+xml',
+      },
+    ],
+    apple: '/apple-icon.png',
+  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+}
 
 export default function RootLayout({
   children,
@@ -9,13 +47,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>
-        <WalletProvider>
-          <Navbar />
-          <main className="min-h-screen bg-background">
-            {children}
-          </main>
-        </WalletProvider>
+      <body className="font-sans antialiased">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <WalletProvider>
+            <div className="flex flex-col min-h-screen">
+              <Navbar />
+              <main className="flex-1">{children}</main>
+            </div>
+            <Toaster />
+          </WalletProvider>
+        </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );

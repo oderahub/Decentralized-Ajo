@@ -645,6 +645,13 @@ impl AjoCircle {
         Ok(())
     }
 
+    /// Upgrade the contract's WASM code. Restricted to admin.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), AjoError> {
+        Self::require_admin(&env, &admin)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
     /// Claim payout when it's a member's turn
     pub fn claim_payout(env: Env, member: Address) -> Result<i128, AjoError> {
         member.require_auth();
@@ -1307,5 +1314,27 @@ mod tests {
         assert_eq!(res, Ok(()));
         assert_eq!(client.get_total_pool(), 100_i128);
         assert!(client.get_last_deposit_timestamp(&member).is_ok());
+    }
+
+    #[test]
+    fn test_upgrade_only_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _organizer, member, _token) = setup_circle_with_member(&env);
+
+        let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let result = client.upgrade(&member, &new_wasm_hash);
+        assert_eq!(result, Err(AjoError::Unauthorized));
+    }
+
+    #[test]
+    fn test_upgrade_happy_path() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, organizer, _member, _token) = setup_circle_with_member(&env);
+
+        let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let result = client.upgrade(&organizer, &new_wasm_hash);
+        assert_eq!(result, Ok(()));
     }
 }
