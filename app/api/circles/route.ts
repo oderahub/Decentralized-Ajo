@@ -1,53 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { verifyToken, extractToken } from '@/lib/auth';
-import { CircleStatus } from '@prisma/client';
-import { applyRateLimit, validateBody } from '@/lib/api-helpers';
-import { RATE_LIMITS } from '@/lib/rate-limit';
-import { CreateCircleSchema, CreateCircleInput } from '@/lib/validations/circle';
-
-export async function POST(request: NextRequest) {
-  const token = extractToken(request.headers.get('authorization'));
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const payload = verifyToken(token);
-  if (!payload) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-
-  const rateLimited = applyRateLimit(request, RATE_LIMITS.api, 'circles:create', payload.userId);
-  if (rateLimited) return rateLimited;
-
-  const validated = await validateBody(request, CreateCircleSchema);
-  if (validated.error) return validated.error;
-  const data = validated.data as CreateCircleInput;
-
-  try {
-    const circle = await prisma.circle.create({
-      data: {
-        name: data.name,
-        description: data.description,
-        organizerId: payload.userId,
-        contributionAmount: data.contributionAmount,
-        contributionFrequencyDays: data.contributionFrequencyDays,
-        maxRounds: data.maxRounds,
-      },
-      include: {
-        organizer: { select: { id: true, email: true, firstName: true, lastName: true } },
-        members: true,
-      },
-    });
-
-    await prisma.circleMember.create({
-      data: { circleId: circle.id, userId: payload.userId, rotationOrder: 1 },
-    });
-
-    return NextResponse.json({ success: true, circle }, { status: 201 });
-  } catch (err) {
-    console.error('Create circle error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-// GET - List circles with pagination and optional status filter
+// GET - List circles with pagination, filtering, and sorting
 export async function GET(request: NextRequest) {
   const token = extractToken(request.headers.get('authorization'));
   if (!token) {
@@ -63,12 +14,14 @@ export async function GET(request: NextRequest) {
   if (rateLimited) return rateLimited;
 
   try {
-
     // Parse and validate query params
     const { searchParams } = request.nextUrl;
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '10', 10) || 10));
     const statusParam = searchParams.get('status')?.toUpperCase();
+    const durationParam = searchParams.get('duration'); // Weekly, Monthly, Quarterly
+    const sortBy = searchParams.get('sortBy') || 'newest'; // newest, size_desc, size_asc, name_asc, name_desc
+    const searchQuery = searchParams.get('search') || '';
 
     // Validate status value if provided
     if (statusParam && !(statusParam in CircleStatus)) {
@@ -80,15 +33,51 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
-    // Base where clause — user's circles as member or organizer
-    const where = {
+    // Build where clause
+    let where: any = {
       OR: [
         { organizerId: payload.userId },
         { members: { some: { userId: payload.userId } } },
       ],
-      // Conditionally add status filter
-      ...(statusParam ? { status: statusParam as CircleStatus } : {}),
     };
+    
+    // Add status filter
+    if (statusParam) {
+      where.status = statusParam as CircleStatus;
+    }
+    
+    // Add duration filter based on contributionFrequencyDays
+    if (durationParam) {
+      if (durationParam === 'Weekly') {
+        where.contributionFrequencyDays = 7;
+      } else if (durationParam === 'Monthly') {
+        where.contributionFrequencyDays = 30;
+      } else if (durationParam === 'Quarterly') {
+        where.contributionFrequencyDays = 90;
+      }
+    }
+
+    // Add search filter
+    if (searchQuery) {
+      where.name = {
+        contains: searchQuery,
+        mode: 'insensitive'
+      };
+    }
+
+    // Build orderBy
+    let orderBy: any = {};
+    if (sortBy === 'size_desc') {
+      orderBy = { members: { _count: 'desc' } };
+    } else if (sortBy === 'size_asc') {
+      orderBy = { members: { _count: 'asc' } };
+    } else if (sortBy === 'name_asc') {
+      orderBy = { name: 'asc' };
+    } else if (sortBy === 'name_desc') {
+      orderBy = { name: 'desc' };
+    } else {
+      orderBy = { createdAt: 'desc' }; // newest first
+    }
 
     // Run count and findMany in parallel
     const [total, circles] = await Promise.all([
@@ -97,7 +86,7 @@ export async function GET(request: NextRequest) {
         where,
         take: limit,
         skip,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: {
           organizer: {
             select: { id: true, email: true, firstName: true, lastName: true },
