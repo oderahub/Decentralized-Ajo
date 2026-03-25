@@ -25,8 +25,9 @@ jobs:
         run: pnpm install
 
       - name: Rust toolchain (matches contracts/ajo-circle/rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.85.0
           targets: wasm32-unknown-unknown
 
       - name: Build & unit-test Soroban contract
