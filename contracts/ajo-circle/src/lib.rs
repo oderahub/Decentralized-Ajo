@@ -70,7 +70,7 @@ pub enum DataKey {
     Circle,
     Members,
     Standings,
-    Admin, 
+    Admin, // YOUR ADDITION
     KycStatus,
     CircleStatus,
     RotationOrder,
@@ -78,6 +78,7 @@ pub enum DataKey {
     RoundContribCount,
     TotalPool,
     LastDepositAt,
+    CycleWithdrawals,
 }
 
 #[contract]
@@ -85,7 +86,7 @@ pub struct AjoCircle;
 
 #[contractimpl]
 impl AjoCircle {
-    /// Internal helper: Ensures the caller is the Admin.
+    /// YOUR ADDITION: Internal helper to verify Admin authority
     fn require_admin(env: &Env, admin: &Address) -> Result<(), AjoError> {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(AjoError::Unauthorized)?;
@@ -104,7 +105,7 @@ impl AjoCircle {
     ) -> Result<(), AjoError> {
         organizer.require_auth();
         
-        // SET ADMIN ROLE - THIS IS NEW
+        // YOUR ADDITION: Set the Admin role
         env.storage().instance().set(&DataKey::Admin, &organizer);
 
         let configured_max_members = if max_members == 0 { MAX_MEMBERS } else { max_members };
@@ -146,16 +147,16 @@ impl AjoCircle {
         Ok(())
     }
 
-    pub fn join_circle(env: Env, member: Address) -> Result<(), AjoError> {
-        member.require_auth();
+    pub fn join_circle(env: Env, organizer: Address, new_member: Address) -> Result<(), AjoError> {
+        organizer.require_auth();
         let mut circle: CircleData = env.storage().instance().get(&DataKey::Circle).ok_or(AjoError::NotFound)?;
         let mut members: Map<Address, MemberData> = env.storage().instance().get(&DataKey::Members).ok_or(AjoError::NotFound)?;
         
-        if members.contains_key(member.clone()) { return Err(AjoError::AlreadyExists); }
+        if members.contains_key(new_member.clone()) { return Err(AjoError::AlreadyExists); }
         if circle.member_count >= circle.max_members { return Err(AjoError::CircleAtCapacity); }
 
-        members.set(member.clone(), MemberData {
-            address: member.clone(),
+        members.set(new_member.clone(), MemberData {
+            address: new_member.clone(),
             total_contributed: 0,
             total_withdrawn: 0,
             has_received_payout: false,
@@ -184,7 +185,7 @@ impl AjoCircle {
     }
 
     pub fn set_kyc_status(env: Env, admin: Address, member: Address, is_verified: bool) -> Result<(), AjoError> {
-        Self::require_admin(&env, &admin)?; // SECURITY UPDATED
+        Self::require_admin(&env, &admin)?; // UPDATED WITH YOUR SECURITY
         let mut kyc: Map<Address, bool> = env.storage().instance().get(&DataKey::KycStatus).unwrap_or_else(|| Map::new(&env));
         kyc.set(member, is_verified);
         env.storage().instance().set(&DataKey::KycStatus, &kyc);
@@ -192,7 +193,7 @@ impl AjoCircle {
     }
 
     pub fn boot_dormant_member(env: Env, admin: Address, member: Address) -> Result<(), AjoError> {
-        Self::require_admin(&env, &admin)?; // SECURITY UPDATED
+        Self::require_admin(&env, &admin)?; // UPDATED WITH YOUR SECURITY
         let mut standings: Map<Address, MemberStanding> = env.storage().instance().get(&DataKey::Standings).unwrap_or(Map::new(&env));
         if let Some(mut standing) = standings.get(member.clone()) {
             standing.is_active = false;
@@ -205,11 +206,30 @@ impl AjoCircle {
     }
 
     pub fn shuffle_rotation(env: Env, admin: Address) -> Result<(), AjoError> {
-        Self::require_admin(&env, &admin)?; // SECURITY UPDATED
+        Self::require_admin(&env, &admin)?; // UPDATED WITH YOUR SECURITY
         let members: Map<Address, MemberData> = env.storage().instance().get(&DataKey::Members).ok_or(AjoError::NotFound)?;
         let mut rotation: Vec<Address> = Vec::new(&env);
         for (addr, _) in members.iter() { rotation.push_back(addr); }
         env.storage().instance().set(&DataKey::RotationOrder, &rotation);
         Ok(())
+    }
+
+    pub fn claim_payout(env: Env, member: Address, cycle: u32) -> Result<i128, AjoError> {
+        member.require_auth();
+        let circle: CircleData = env.storage().instance().get(&DataKey::Circle).ok_or(AjoError::NotFound)?;
+        let mut members: Map<Address, MemberData> = env.storage().instance().get(&DataKey::Members).ok_or(AjoError::NotFound)?;
+        let mut member_data = members.get(member.clone()).ok_or(AjoError::NotFound)?;
+
+        let payout = (circle.member_count as i128) * circle.contribution_amount;
+        member_data.total_withdrawn += payout;
+        member_data.has_received_payout = true;
+
+        members.set(member.clone(), member_data);
+        env.storage().instance().set(&DataKey::Members, &members);
+
+        let token_client = token::Client::new(&env, &circle.token_address);
+        token_client.transfer(&env.current_contract_address(), &member, &payout);
+
+        Ok(payout)
     }
 }
