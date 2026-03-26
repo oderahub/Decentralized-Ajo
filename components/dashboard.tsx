@@ -3,6 +3,7 @@
 import React from 'react';
 import { useWallet } from '@/lib/wallet-context';
 import { DashboardCard } from './dashboard-card';
+import { DashboardCardSkeleton } from './dashboard-card-skeleton';
 import { Button } from '@/components/ui/button';
 import { Wallet, Info } from 'lucide-react';
 
@@ -15,9 +16,10 @@ interface AjoGroup {
 
 interface DashboardProps {
   activeGroups: AjoGroup[];
+  loading?: boolean;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ activeGroups }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ activeGroups, loading = false }) => {
   const { isConnected, connectWallet, isLoading } = useWallet();
 
   // 1. Wallet Connection Handling
@@ -56,7 +58,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeGroups }) => {
       </header>
 
       {/* 3. & 4. Data Rendering and Grid Responsiveness */}
-      {activeGroups.length > 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {[1, 2, 3].map((i) => (
+            <DashboardCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : activeGroups.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {activeGroups.map((group) => (
             <DashboardCard
