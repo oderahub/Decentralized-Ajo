@@ -19,8 +19,12 @@ use soroban_sdk::{
 const MAX_MEMBERS: u32 = 50;
 const HARD_CAP: u32 = 100;
 
-// ---------------- ADMIN ROLE (simple AccessControl style) ----------------
+// ---------------- ROLE CONSTANTS (Generic AccessControl style) ----------------
 const ADMIN_ROLE: Symbol = symbol_short!("ADMIN");
+const MANAGER_ROLE: Symbol = symbol_short!("MANAGER");
+
+// Legacy alias for backward compatibility
+const ROLE_ADMIN: Symbol = ADMIN_ROLE;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -87,6 +91,9 @@ pub enum DataKey {
     TotalPool,
     LastDepositAt,
     CycleWithdrawals,
+    // Role management keys
+    RoleMembers,  // Map<RoleSymbol, Vec<Address>> - stores addresses per role
+    Deployer,     // Original deployer address (cannot be changed - for critical operations)
 }
 
 #[contract]
@@ -95,17 +102,75 @@ pub struct AjoCircle;
 #[contractimpl]
 impl AjoCircle {
 
-    // ---------------- ADMIN CHECK ----------------
+    // ---------------- ROLE CHECKS (Generic AccessControl style) ----------------
+    
+    /// Check if caller has the specified role
+    fn has_role(env: &Env, role: Symbol, caller: &Address) -> bool {
+        let role_members: Map<Symbol, Vec<Address>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoleMembers)
+            .unwrap_or_else(|| Map::new(&env));
+        
+        if let Some(members) = role_members.get(role) {
+            for i in 0..members.len() {
+                if let Some(member) = members.get(i) {
+                    if member == *caller {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    
+    /// Require the caller to have the specified role
+    fn require_role(env: &Env, role: Symbol, caller: &Address) -> Result<(), AjoError> {
+        caller.require_auth();
+        
+        // First check if it's the deployer (deployer has all roles)
+        if let Some(deployer) = env.storage().instance().get::<DataKey, Address>(&DataKey::Deployer) {
+            if deployer == *caller {
+                return Ok(());
+            }
+        }
+        
+        // Then check role membership
+        if !Self::has_role(env, role, caller) {
+            return Err(AjoError::Unauthorized);
+        }
+        Ok(())
+    }
+    
+    /// Require deployer role (only original deployer can call this)
+    fn require_deployer(env: &Env, caller: &Address) -> Result<(), AjoError> {
+        caller.require_auth();
+        
+        let deployer: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Deployer)
+            .ok_or(AjoError::Unauthorized)?;
+        
+        if deployer != *caller {
+            return Err(AjoError::Unauthorized);
+        }
+        Ok(())
+    }
+    
+    // ---------------- ADMIN CHECK (Legacy - uses ADMIN role) ----------------
     fn require_admin(env: &Env, caller: &Address) -> Result<(), AjoError> {
         caller.require_auth();
 
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .ok_or(AjoError::Unauthorized)?;
-
-        if stored_admin != *caller {
+        // First check if it's the deployer (deployer has all roles)
+        if let Some(deployer) = env.storage().instance().get::<DataKey, Address>(&DataKey::Deployer) {
+            if deployer == *caller {
+                return Ok(());
+            }
+        }
+        
+        // Then check ADMIN role
+        if !Self::has_role(env, ADMIN_ROLE, caller) {
             return Err(AjoError::Unauthorized);
         }
         Ok(())
@@ -125,6 +190,25 @@ impl AjoCircle {
         organizer.require_auth();
         let configured_max_members = if max_members == 0 { MAX_MEMBERS } else { max_members };
 
+        // Set the deployer (original creator - cannot be changed)
+        env.storage().instance().set(&DataKey::Deployer, &organizer);
+        
+        // Initialize role membership storage
+        let mut role_members: Map<Symbol, Vec<Address>> = Map::new(&env);
+        
+        // Grant ADMIN role to the organizer
+        let mut admin_members: Vec<Address> = Vec::new(&env);
+        admin_members.push(organizer.clone());
+        role_members.set(ADMIN_ROLE, admin_members);
+        
+        // Grant MANAGER role to the organizer
+        let mut manager_members: Vec<Address> = Vec::new(&env);
+        manager_members.push(organizer.clone());
+        role_members.set(MANAGER_ROLE, manager_members);
+        
+        env.storage().instance().set(&DataKey::RoleMembers, &role_members);
+        
+        // Legacy: keep Admin for backward compatibility
         env.storage().instance().set(&DataKey::Admin, &organizer);
 
         let configured_max_members = if max_members == 0 {
@@ -650,5 +734,145 @@ impl AjoCircle {
 
     pub fn get_circle_state(env: Env) -> Result<CircleData, AjoError> {
         env.storage().instance().get(&DataKey::Circle).ok_or(AjoError::NotFound)
+    }
+    
+    // ---------------- ROLE MANAGEMENT (Generic AccessControl) ----------------
+    
+    /// Grant a role to an address (only deployer can do this)
+    pub fn grant_role(env: Env, caller: Address, role: Symbol, new_member: Address) -> Result<(), AjoError> {
+        Self::require_deployer(&env, &caller)?;
+        
+        let mut role_members: Map<Symbol, Vec<Address>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoleMembers)
+            .unwrap_or_else(|| Map::new(&env));
+        
+        // Check if member already has the role
+        if let Some(members) = role_members.get(role) {
+            for i in 0..members.len() {
+                if let Some(existing) = members.get(i) {
+                    if existing == new_member {
+                        return Err(AjoError::AlreadyExists);
+                    }
+                }
+            }
+            // Add to existing role
+            let mut updated_members = members.clone();
+            updated_members.push_back(new_member);
+            role_members.set(role, updated_members);
+        } else {
+            // Create new role entry
+            let mut new_members: Vec<Address> = Vec::new(&env);
+            new_members.push_back(new_member);
+            role_members.set(role, new_members);
+        }
+        
+        env.storage().instance().set(&DataKey::RoleMembers, &role_members);
+        
+        // Emit RoleGranted event
+        env.events().publish(
+            (symbol_short!("role_grant"), new_member),
+            (role, env.ledger().timestamp())
+        );
+        
+        Ok(())
+    }
+    
+    /// Revoke a role from an address (only deployer can do this)
+    pub fn revoke_role(env: Env, caller: Address, role: Symbol, member: Address) -> Result<(), AjoError> {
+        Self::require_deployer(&env, &caller)?;
+        
+        // Cannot revoke deployer's own role
+        if let Some(deployer) = env.storage().instance().get::<DataKey, Address>(&DataKey::Deployer) {
+            if deployer == member && role == ADMIN_ROLE {
+                return Err(AjoError::Unauthorized);
+            }
+        }
+        
+        let mut role_members: Map<Symbol, Vec<Address>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoleMembers)
+            .unwrap_or_else(|| Map::new(&env));
+        
+        if let Some(members) = role_members.get(role) {
+            let mut updated_members: Vec<Address> = Vec::new(&env);
+            let mut found = false;
+            
+            for i in 0..members.len() {
+                if let Some(existing) = members.get(i) {
+                    if existing != member {
+                        updated_members.push_back(existing);
+                    } else {
+                        found = true;
+                    }
+                }
+            }
+            
+            if !found {
+                return Err(AjoError::NotFound);
+            }
+            
+            role_members.set(role, updated_members);
+            env.storage().instance().set(&DataKey::RoleMembers, &role_members);
+            
+            // Emit RoleRevoked event
+            env.events().publish(
+                (symbol_short!("role_revoke"), member),
+                (role, env.ledger().timestamp())
+            );
+        }
+        
+        Ok(())
+    }
+    
+    /// Check if an address has a specific role
+    pub fn has_role(env: Env, role: Symbol, member: Address) -> bool {
+        // Check deployer first
+        if let Some(deployer) = env.storage().instance().get::<DataKey, Address>(&DataKey::Deployer) {
+            if deployer == member {
+                return true;
+            }
+        }
+        
+        // Then check role membership
+        let role_members: Map<Symbol, Vec<Address>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoleMembers)
+            .unwrap_or_else(|| Map::new(&env));
+        
+        if let Some(members) = role_members.get(role) {
+            for i in 0..members.len() {
+                if let Some(existing) = members.get(i) {
+                    if existing == member {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    
+    /// Get the deployer address (read-only, cannot be changed)
+    pub fn get_deployer(env: Env) -> Result<Address, AjoError> {
+        env.storage().instance()
+            .get(&DataKey::Deployer)
+            .ok_or(AjoError::NotFound)
+    }
+    
+    /// Emergency: Only deployer can panic the circle (severe action)
+    pub fn emergency_panic(env: Env, caller: Address) -> Result<(), AjoError> {
+        Self::require_deployer(&env, &caller)?;
+        env.storage().instance().set(&DataKey::CircleStatus, &true);
+        
+        // Emit EmergencyPanic event
+        env.events().publish(
+            symbol_short!("emergency_panic"),
+            (caller, env.ledger().timestamp())
+        );
+        
+        Ok(())
     }
 }
