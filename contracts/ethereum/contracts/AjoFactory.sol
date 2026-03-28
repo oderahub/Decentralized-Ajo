@@ -114,7 +114,7 @@ contract AjoFactory is Ownable {
         }
 
         address[] memory slice = new address[](count);
-        for (uint32 i = 0; i < count; i++) {
+        for (uint256 i = 0; i < count; i++) {
             slice[i] = ajoRegistry[_offset + i];
         }
         return slice;
