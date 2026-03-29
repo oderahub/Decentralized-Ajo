@@ -39,6 +39,15 @@ For Solidity contracts (not the Soroban crate in this tree):
 npx hardhat verify --network <network> <DEPLOYED_ADDRESS> "<constructor_arg_1>" "<constructor_arg_2>"
 ```
 
+Or use the helper script provided in this repo (reuses deployment metadata and the exact constructor args for AjoCircle):
+
+```bash
+cd contracts
+npm run verify:sepolia
+# or
+npm run verify:mainnet
+```
+
 Set `ETHERSCAN_API_KEY` (or `POLYGONSCAN_API_KEY`, etc.) in your environment or `hardhat.config`.
 
 ## Why both sections?

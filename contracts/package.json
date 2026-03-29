@@ -8,8 +8,8 @@
     "test": "hardhat test",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
     "deploy:mainnet": "hardhat run scripts/deploy.js --network mainnet",
-    "verify:sepolia": "hardhat verify --network sepolia",
-    "verify:mainnet": "hardhat verify --network mainnet"
+    "verify:sepolia": "node scripts/verify.js --network sepolia",
+    "verify:mainnet": "node scripts/verify.js --network mainnet"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",
