@@ -45,8 +45,6 @@ model User {
   notifications Notification[]
   
   // New Ajo Group Relations
-  createdGroups AjoGroup[]  @relation("GroupCreator")
-  memberships   AjoMember[]
   ajos          UserAjo[]
   ajoParticipations UserAjoParticipation[]
   settings      UserSettings?
@@ -385,25 +383,29 @@ enum NotificationType {
 // ==========================================
 
 model AjoGroup {
-  id              String   @id @default(uuid())
-  contractAddress String   @unique
+  id              String    @id @default(uuid())
+  contractAddress String    @unique
   name            String
-  description     String?
-  creatorAddress  String
-  status          String   @default("OPEN")
+  contributionAmt String    // Stored as string to match uint256 from smart contract
+  cycleDuration   Int       // Duration in days
   maxMembers      Int
-  createdAt       DateTime @default(now())
+  status          String    @default("OPEN")
+  createdAt       DateTime  @default(now())
+  
   members         UserAjo[]
+  
+  @@index([contractAddress])
+  @@index([status])
 }
 
 model UserAjo {
   userAddress String
   ajoId       String
+  
+  user        User     @relation(fields: [userAddress], references: [address], onDelete: Cascade)
   ajo         AjoGroup @relation(fields: [ajoId], references: [id], onDelete: Cascade)
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  group       AjoGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, groupId]) // Prevents duplicate memberships
-  @@map("ajo_members")
+  
+  @@id([userAddress, ajoId])
+  @@index([userAddress])
+  @@index([ajoId])
 }
